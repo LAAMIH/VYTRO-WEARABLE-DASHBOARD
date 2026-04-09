@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vytro | Smart Vitals Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    
+    <style>
+        .sim-slider-group { margin-bottom: 1.5rem; text-align: left;}
+        .sim-slider-group label { display: flex; justify-content: space-between; margin-bottom: 0.5rem;}
+        .sim-slider-group input[type=range] { width: 100%; accent-color: var(--accent-primary);}
+        .profile-edit-input { width: 100%; background: rgba(0,0,0,0.4); border: 1px solid var(--border-glass); color: white; padding: 8px; border-radius: 6px; font-family: var(--font-body); display: none; }
+        
+        select.profile-edit-input { appearance: auto; cursor: pointer; }
+        select.profile-edit-input option { background: #131A26; color: white; }
+
+        .edit-mode .profile-edit-input { display: block; }
+        .edit-mode .profile-val { display: none !important; }
+        
+        /* Floating Action Buttons */
+        .fab-container { position: fixed; bottom: 2rem; right: 2rem; display: flex; gap: 1rem; z-index: 40; }
+        .fab { width: 60px; height: 60px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.5); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .fab:hover { transform: scale(1.1); }
+        .fab-doctor { background: var(--accent-green); color: black; }
+        .fab-sos { background: var(--accent-red); color: white; box-shadow: 0 0 20px rgba(255, 51, 102, 0.4); animation: pulseFab 2s infinite alternate;}
+        @keyframes pulseFab { from { box-shadow: 0 0 10px rgba(255, 51, 102, 0.2); } to { box-shadow: 0 0 25px rgba(255, 51, 102, 0.6); } }
+
+        /* Call Modal specific styling */
+        .call-avatar { width: 100px; height: 100px; border-radius: 50%; background: rgba(255,255,255,0.1); margin: 0 auto 2rem auto; display: flex; align-items: center; justify-content: center; position: relative;}
+        .call-avatar i { width: 40px; height: 40px; color: white;}
+        .ripple { position: absolute; border-radius: 50%; border: 2px solid var(--accent-green); animation: rippleEffect 2s linear infinite; }
+        .ripple2 { animation-delay: 1s; }
+        @keyframes rippleEffect { 0% { width: 100px; height: 100px; opacity: 1; } 100% { width: 200px; height: 200px; opacity: 0; } }
+        
+        #avatar-initials { font-family: var(--font-heading); font-size: 2.5rem; font-weight: 600; letter-spacing: 1px; color: var(--accent-primary); }
+        
+        .faq-answer ul { margin-top: 0.5rem; padding-left: 1.5rem; list-style-type: square; color: #E0E0E0;}
+        .faq-answer li { margin-bottom: 0.5rem; }
+    </style>
+</head>
+<body>
+    <script>
+        // Intercept FOUC (Flash of Unstyled Content) for Login View
+        if (sessionStorage.getItem('vytroUser')) {
+            document.documentElement.classList.add('session-active');
+            document.body.setAttribute('data-tab', 'dashboard');
+        } else {
+            document.body.setAttribute('data-tab', 'login');
+        }
+    </script>
+    <div id="noise-overlay"></div>
+    
+    <!-- Dynamic Tab Backgrounds Engine -->
+    <div class="dynamic-bgs">
+        <div id="bg-login" class="bg-layer">
+        </div>
+        <div id="bg-dashboard" class="bg-layer">
+        </div>
+        <div id="bg-profile" class="bg-layer">
+            <div class="hex-layer"></div>
+        </div>
+        <div id="bg-faq" class="bg-layer">
+            <div class="laser-h"></div><div class="laser-v"></div>
+        </div>
+    </div>
+
+    <!-- Ambient Glassmorphism Blobs -->
+    <div class="blob-container">
+        <div class="blob blob1"></div>
+        <div class="blob blob2"></div>
+        <div class="blob blob3"></div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    
+    <!-- SOS MODAL OVERLAY -->
+    <div id="sos-modal" class="modal hidden" style="z-index: 100;">
+        <div class="modal-content sos-content">
+            <i data-lucide="triangle-alert" class="sos-icon"></i>
+            <h2>CRITICAL ALERT</h2>
+            <p id="sos-message" style="font-weight: 600;">Abnormal vital signs detected!</p>
+            <div class="sos-loader">
+                <div class="pulse-ring"></div>
+            </div>
+            <p class="sos-subtext" id="sos-alerting-text">Contacting Nearest Hospital & Emergency Contacts...</p>
+            <button id="cancel-sos" class="btn btn-outline" style="margin-top: 2rem;">Cancel SOS (User Override)</button>
+        </div>
+    </div>
+
+    <!-- CALLING DOCTOR MODAL -->
+    <div id="call-doc-modal" class="modal hidden" style="z-index: 100;">
+        <div class="modal-content glass-panel" style="text-align: center; padding: 4rem; max-width: 400px; width: 100%;">
+            <div class="call-avatar">
+                <div class="ripple"></div>
+                <div class="ripple ripple2"></div>
+                <i data-lucide="user"></i>
+            </div>
+            <h2 id="call-doc-name" style="margin-bottom: 0.5rem;">Unset</h2>
+            <p style="color: var(--accent-green); margin-bottom: 2rem;">Calling...</p>
+            <button id="end-call-btn" class="btn btn-outline" style="border-color: var(--accent-red); color: var(--accent-red); width: 60px; height: 60px; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto; background: rgba(255, 51, 102, 0.1);"><i data-lucide="phone-off"></i></button>
+        </div>
+    </div>
+
+    <!-- EMERGENCY DIAL MODAL -->
+    <div id="call-em-modal" class="modal hidden" style="z-index: 100;">
+        <div class="modal-content glass-panel" style="text-align: center; padding: 4rem; max-width: 400px; width: 100%; border: 1px solid var(--accent-red);">
+            <div class="call-avatar" style="background: rgba(255,51,102,0.1);">
+                <div class="ripple" style="border-color: var(--accent-red);"></div>
+                <div class="ripple ripple2" style="border-color: var(--accent-red);"></div>
+                <i data-lucide="ambulance" style="color: var(--accent-red);"></i>
+            </div>
+            <h2 style="margin-bottom: 0.5rem; color: var(--accent-red);">911 Emergency</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 2rem;">Connecting to Dispatch...</p>
+            <button id="end-em-btn" class="btn" style="background: var(--accent-red); color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin: 0 auto;"><i data-lucide="phone-off"></i></button>
+        </div>
+    </div>
+
+    <!-- MANUAL SIMULATION MODAL -->
+    <div id="sim-modal" class="modal hidden" style="z-index: 101;">
+        <div class="modal-content glass-panel" style="max-width: 500px; width: 100%; padding: 3rem; background: #131A26; border: 1px solid var(--accent-primary);">
+            <h2 style="margin-bottom: 1rem;">Manual Testing Interface</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 0.9rem;">Slide the values below to immediately push data to the dashboard and trigger alerts.</p>
+            
+            <div class="sim-slider-group">
+                <label>Heart Rate (BPM): <span id="sim-hr-val">72</span></label>
+                <input type="range" id="sim-hr" min="40" max="180" value="72">
+            </div>
+            <div class="sim-slider-group">
+                <label>Blood O2 (%): <span id="sim-o2-val">98</span></label>
+                <input type="range" id="sim-o2" min="80" max="100" value="98">
+            </div>
+            <div class="sim-slider-group">
+                <label>Temperature (°C): <span id="sim-temp-val">36.6</span></label>
+                <input type="range" id="sim-temp" min="34" max="42" step="0.1" value="36.6">
+            </div>
+            <div class="sim-slider-group">
+                <label>Stress Level: <span id="sim-stress-val">20</span></label>
+                <input type="range" id="sim-stress" min="0" max="100" value="20">
+            </div>
+            <div class="sim-slider-group" style="display:flex; justify-content: space-between; align-items: center; margin-top: 2rem;">
+                <label style="margin: 0;">Trigger Fall Detection:</label>
+                <button id="sim-fall-btn" class="btn " style="background:var(--accent-red); color:white;">Simulate Fall</button>
+            </div>
+
+            <div style="margin-top: 2rem; display: flex; gap: 1rem;">
+                <button id="sim-push-btn" class="btn btn-primary w-100">Push Payload</button>
+            </div>
+            <div style="margin-top: 1rem; display: flex; gap: 1rem;">
+                <button id="sim-stop-btn" class="btn btn-outline" style="flex:1; border-color: var(--accent-red); color: var(--accent-red);">Stop</button>
+                <button id="sim-normal-btn" class="btn btn-outline" style="flex:1;">Set Normal</button>
+                <button id="sim-close-btn" class="btn btn-outline" style="flex:1;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGOUT MODAL -->
+    <div id="logout-modal" class="modal hidden" style="z-index: 105;">
+        <div class="modal-content glass-panel" style="padding: 3rem; text-align: center; border: 1px solid var(--accent-red);">
+            <i data-lucide="log-out" style="width: 60px; height: 60px; color: var(--accent-red); margin-bottom: 1rem;"></i>
+            <h2 style="margin-bottom: 1rem;">Confirm Logout</h2>
+            <p style="margin-bottom: 2rem; color: var(--text-secondary);">Are you sure you want to securely log out? Your session will end.</p>
+            <div style="display: flex; gap: 1rem;">
+                <button id="confirm-logout-btn" type="button" class="btn btn-primary w-100" style="background: var(--accent-red); color: white; box-shadow: 0 0 15px rgba(255, 51, 102, 0.4);">Confirm Logout</button>
+                <button id="cancel-logout-btn" type="button" class="btn btn-outline w-100">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 1. LOGIN SCREEN -->
+    <section id="login-view" class="view active">
+        <div class="login-container">
+            <div class="brand" style="text-align: center; margin-bottom: 2rem;">
+                <h1 class="text-phase" style="font-size: 3.5rem;">VYTRO</h1>
+                <p id="health-quote" style="font-style: italic; color: var(--text-secondary); max-width: 600px; margin: 10px auto; min-height: 2.5rem; font-size: 1.1rem;">Loading vital parameters...</p>
+            </div>
+            <!-- STEP 1: SELECT ROLE -->
+            <div id="login-step-selection" class="tier-cards">
+                <!-- 1. FREE USER -->
+                <div class="glass-panel role-card select-role-btn" data-role="Free Patient" data-tier="free">
+                    <h3><i data-lucide="user"></i> Free User</h3>
+                    <p class="role-desc">Basic health telemetry, fallback emergency alerts, and a comprehensive symptom engine.</p>
+                    <ul class="role-features">
+                        <li><i data-lucide="activity" style="color:var(--accent-primary);"></i> Standard Vitals Tracking</li>
+                        <li><i data-lucide="search" style="color:var(--accent-primary);"></i> Symptom Remedy Search</li>
+                        <li><i data-lucide="phone" style="color:var(--accent-primary);"></i> 3 Emergency Contacts</li>
+                    </ul>
+                    <button class="btn btn-outline w-100 mt-auto">Select Basic</button>
+                </div>
+                
+                <!-- 2. PREMIUM USER -->
+                <div class="glass-panel role-card premium-card select-role-btn" data-role="Premium Patient" data-tier="premium">
+                    <div class="tag" style="position: absolute; top: 1rem; right: 1rem; background: #D4AF37; color: #000; font-weight: bold; border: none;">SUPREME</div>
+                    <h3><i data-lucide="crown" style="color:#D4AF37;"></i> Premium</h3>
+                    <p class="role-desc">Unlock specialized elite doctors, AI-driven health predictions, and our signature Gold theme.</p>
+                    <ul class="role-features">
+                        <li><i data-lucide="award" style="color:#D4AF37;"></i> Top 1% Specialist Roster</li>
+                        <li><i data-lucide="zap" style="color:#D4AF37;"></i> Real-time AI Diagnostics</li>
+                        <li><i data-lucide="sparkles" style="color:#D4AF37;"></i> Ad-free Gold Interface</li>
+                    </ul>
+                    <button class="btn btn-primary w-100 mt-auto" style="background:#D4AF37; color:#000; border:none; box-shadow: 0 0 15px rgba(212, 175, 55, 0.4);">Select Supreme</button>
+                </div>
+
+                <!-- 3. DOCTOR PORTAL -->
+                <div class="glass-panel role-card select-role-btn" data-role="Attending Doctor" data-tier="doctor">
+                    <h3><i data-lucide="stethoscope"></i> Doctor</h3>
+                    <p class="role-desc">Enterprise-grade interface for monitoring remote patient telemetry and critical alert logs.</p>
+                    <ul class="role-features">
+                        <li><i data-lucide="users"></i> Patient Roster Sync</li>
+                        <li><i data-lucide="database"></i> Raw Telemetry Streams</li>
+                        <li><i data-lucide="file-text"></i> Medical Documentation</li>
+                    </ul>
+                    <button class="btn btn-outline w-100 mt-auto">Select Doctor</button>
+                </div>
+            </div>
+
+            <!-- STEP 2: AUTHENTICATE -->
+            <div id="login-step-auth" class="glass-panel hidden" style="width: 100%; max-width: 400px; padding: 3rem; text-align: center;">
+                <h3 id="auth-role-title" style="margin-bottom: 1.5rem; color: var(--accent-primary);">Login Required</h3>
+                <form id="auth-form">
+                    <div class="input-group">
+                        <label>Identity Handle</label>
+                        <input type="text" id="auth-username" required placeholder="User ID / Name">
+                    </div>
+                    <div class="input-group">
+                        <label>Secure Passcode</label>
+                        <input type="password" id="auth-password" required placeholder="••••••••">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 mt-1" id="auth-btn">Establish Secure Link</button>
+                </form>
+                <button class="btn btn-outline w-100 mt-1" style="font-size: 0.8rem;" id="back-to-roles">Back to Role Selection</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. MAIN APPLICATION -->
+    <section id="app-view" class="view hidden">
+        <!-- SIDEBAR -->
+        <nav class="sidebar">
+            <div class="brand-small">
+                <i data-lucide="activity" class="brand-icon-small"></i>
+                <h2>VYTRO</h2>
+            </div>
+            <div class="nav-links">
+                <button class="nav-btn active" data-target="dashboard">
+                    <i data-lucide="layout-dashboard"></i><span>Dashboard</span>
+                </button>
+                <button class="nav-btn" data-target="profile" id="nav-profile">
+                    <i data-lucide="user"></i><span>Profile & Medical</span>
+                </button>
+                <button class="nav-btn" data-target="faq" id="nav-faq">
+                    <i data-lucide="search"></i><span>Symptom Search</span>
+                </button>
+            </div>
+            
+            <div class="connection-status">
+                <div style="display:flex; gap: 0.5rem; margin-bottom: 10px;">
+                    <button id="connect-btn" class="btn btn-glow" style="flex:1; padding: 12px 10px;" title="USB Serial">
+                        <i data-lucide="usb" style="width: 20px;"></i> USB
+                    </button>
+                    <button id="ble-btn" class="btn btn-glow" style="flex:1; padding: 12px 10px; border-color: var(--accent-blue); color: var(--accent-blue); box-shadow: inset 0 0 10px rgba(51, 136, 255, 0.1), 0 0 10px rgba(51, 136, 255, 0.1);" title="Bluetooth Low Energy">
+                        <i data-lucide="bluetooth" style="width: 20px;"></i> BLE
+                    </button>
+                </div>
+                <button id="sim-btn" class="btn btn-outline w-100">
+                    <i data-lucide="sliders"></i> Manual Simulation
+                </button>
+                <p class="status-indicator disconnected" id="status-text"><span class="dot"></span> Awaiting Data...</p>
+            </div>
+        </nav>
+
+        <!-- MAIN LAYOUT -->
+        <main class="main-content">
+            
+            <div class="fab-container">
+                <button class="fab fab-doctor" id="fab-doctor-dial" title="Contact Personal Doctor"><i data-lucide="stethoscope"></i></button>
+                <button class="fab fab-sos" id="fab-emergency-dial" title="Dial 911 Emergency"><i data-lucide="phone-call" style="width: 28px; height: 28px;"></i></button>
+            </div>
+
+            <!-- DASHBOARD TAB -->
+            <div id="tab-dashboard" class="tab-pane active">
+                <header class="tab-header">
+                    <h2 class="text-phase">Live Vitals Dashboard</h2>
+                    <div class="current-time" id="clock">00:00:00 AM</div>
+                </header>
+
+                <!-- PREMIUM SPECIALIST STATUS -->
+                <div id="premium-dashboard-header" class="glass-panel" style="display: none; padding: 1.5rem; border-color: #D4AF37; background: rgba(212, 175, 55, 0.05); margin-bottom: 2rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h3 style="color: #D4AF37; display: flex; align-items: center; gap: 10px; margin: 0;"><i data-lucide="crown"></i> Supreme Specialist Care Active</h3>
+                            <p style="font-size: 0.85rem; opacity: 0.8; margin-top: 5px;">Recruit world-class medical experts via your Profile tab.</p>
+                        </div>
+                        <div id="mini-care-team" style="display: flex; gap: 10px;">
+                            <!-- Dynamically filled by JS -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <div class="vital-card glass-panel" id="card-hr">
+                        <div class="vital-header">
+                            <div class="icon-box red"><i data-lucide="heart"></i></div>
+                            <h3>Heart Rate</h3>
+                        </div>
+                        <div class="vital-value"><span id="val-hr">--</span><span class="unit">bpm</span></div>
+                        <div class="vital-chart-mini"><canvas id="chart-hr"></canvas></div>
+                    </div>
+                    <div class="vital-card glass-panel" id="card-o2">
+                        <div class="vital-header">
+                            <div class="icon-box blue"><i data-lucide="droplet"></i></div>
+                            <h3>Blood O2</h3>
+                        </div>
+                        <div class="vital-value"><span id="val-o2">--</span><span class="unit">%</span></div>
+                        <div class="vital-baseline">Normal: > 95%</div>
+                    </div>
+                    <div class="vital-card glass-panel" id="card-temp">
+                        <div class="vital-header">
+                            <div class="icon-box orange"><i data-lucide="thermometer"></i></div>
+                            <h3>Skin Temp</h3>
+                        </div>
+                        <div class="vital-value"><span id="val-temp">--</span><span class="unit">°C</span></div>
+                        <div class="vital-baseline">Normal: 36.5 - 37.5</div>
+                    </div>
+                    <div class="vital-card glass-panel" id="card-stress">
+                        <div class="vital-header">
+                            <div class="icon-box purple"><i data-lucide="brain"></i></div>
+                            <h3>Stress Level</h3>
+                        </div>
+                        <div class="vital-value"><span id="val-stress" style="font-size: 2.5rem; text-transform: capitalize;">--</span></div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="bar-stress" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="status-panel glass-panel mt-2">
+                    <div class="fall-detection" id="fall-status">
+                        <i data-lucide="shield-check" id="fall-icon"></i>
+                        <div class="fall-text">
+                            <h3>Fall Detection Active</h3>
+                            <p>No sudden impacts or falls detected.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PROFILE TAB -->
+            <div id="tab-profile" class="tab-pane hidden">
+                <header class="tab-header">
+                    <h2 class="text-phase">Patient Profile & Medical Data</h2>
+                    <div>
+                        <button id="profile-edit-toggle" class="btn btn-outline" style="font-size: 0.9rem; margin-right: 12px;"><i data-lucide="edit"></i> Edit Profile</button>
+                        <button id="logout-btn" class="btn btn-outline" style="font-size: 0.9rem; border-color: var(--accent-red); color: var(--accent-red);"><i data-lucide="log-out"></i> Logout</button>
+                    </div>
+                </header>
+                <div class="profile-layout" id="profile-container">
+                    <div class="glass-panel profile-details">
+                        <div class="avatar" id="avatar-initials"></div>
+                        <div class="info-grid">
+                            <div class="info-item" style="grid-column: span 2;">
+                                <label>BMI (Body Mass Index)</label>
+                                <p class="profile-val" style="display: flex; align-items: center;"><span id="prof-bmi">--</span> <span class="highlight-tag" id="prof-bmi-status" style="display:none; margin-left: 10px;"></span></p>
+                            </div>
+                            <div class="info-item">
+                                <label>Full Name</label>
+                                <p class="profile-val" id="prof-name">--</p>
+                                <input type="text" class="profile-edit-input" id="edit-name" value="">
+                            </div>
+                            <div class="info-item">
+                                <label>Age</label>
+                                <p class="profile-val" id="prof-age">--</p>
+                                <input type="number" class="profile-edit-input" id="edit-age" value="" placeholder="Age">
+                            </div>
+                            <div class="info-item">
+                                <label>Height (cm)</label>
+                                <p class="profile-val" id="prof-height">--</p>
+                                <input type="number" class="profile-edit-input" id="edit-height" value="" min="50" max="250" placeholder="e.g. 175">
+                            </div>
+                            <div class="info-item">
+                                <label>Weight (kg)</label>
+                                <p class="profile-val" id="prof-weight">--</p>
+                                <input type="number" class="profile-edit-input" id="edit-weight" value="" min="5" max="300" placeholder="e.g. 70">
+                            </div>
+                            <div class="info-item">
+                                <label>Blood Group</label>
+                                <p class="profile-val highlight-tag" id="prof-blood">Unset</p>
+                                <select class="profile-edit-input" id="edit-blood">
+                                    <option value="" disabled selected>Select Blood Group</option>
+                                    <option value="A+ve">A+ve</option>
+                                    <option value="A-ve">A-ve</option>
+                                    <option value="B+ve">B+ve</option>
+                                    <option value="B-ve">B-ve</option>
+                                    <option value="AB+ve">AB+ve</option>
+                                    <option value="AB-ve">AB-ve</option>
+                                    <option value="O+ve">O+ve</option>
+                                    <option value="O-ve">O-ve</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button id="profile-save-btn" class="btn btn-primary w-100" style="display:none; margin-top:2rem;">Save Changes</button>
+                    </div>
+                    
+                    <div class="glass-panel alerts-details">
+                        <h3>Critical Medical Information</h3>
+                        <div class="info-item mt-1">
+                            <label>Known Allergies (comma separated)</label>
+                            <div class="tags profile-val" id="prof-allergies-tags"><span class="tag">None</span></div>
+                            <input type="text" class="profile-edit-input" id="edit-allergies" value="" placeholder="e.g. Peanuts, Penicillin">
+                        </div>
+                        <div class="info-item mt-2">
+                            <label>Pre-existing Conditions</label>
+                            <p class="profile-val" id="prof-conditions">None</p>
+                            <input type="text" class="profile-edit-input" id="edit-conditions" value="" placeholder="e.g. Asthma">
+                        </div>
+                        <hr class="divider">
+                        <h3>Emergency Contacts</h3>
+                        
+                        <!-- Premium Specialized Doctors -->
+                        <div id="premium-doc-area" style="display: none; margin-bottom: 2.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                                <h4 style="margin: 0; color: var(--accent-primary); font-size: 1.2rem;">Elite Medical Recruitment</h4>
+                                <span style="font-size: 0.8rem; opacity: 0.7;" id="doc-slots-left">3 Active Slots</span>
+                            </div>
+
+                            <div class="specialty-buttons">
+                                <div class="spec-btn" onclick="openMarketplace('Cardiology')">
+                                    <i data-lucide="heart"></i>
+                                    <span>Cardiology</span>
+                                </div>
+                                <div class="spec-btn" onclick="openMarketplace('Gastroenterology')">
+                                    <i data-lucide="utensils"></i>
+                                    <span>Gastro</span>
+                                </div>
+                                <div class="spec-btn" onclick="openMarketplace('ENT')">
+                                    <i data-lucide="mic"></i>
+                                    <span>E.N.T</span>
+                                </div>
+                                <div class="spec-btn" onclick="openMarketplace('Neurology')">
+                                    <i data-lucide="brain"></i>
+                                    <span>Neurology</span>
+                                </div>
+                                <div class="spec-btn" onclick="openMarketplace('Dermatology')">
+                                    <i data-lucide="sparkles"></i>
+                                    <span>Derm</span>
+                                </div>
+                                <div class="spec-btn" onclick="openMarketplace('all')">
+                                    <i data-lucide="users"></i>
+                                    <span>Browse All</span>
+                                </div>
+                            </div>
+
+                            <div style="margin-bottom: 1rem; font-weight: 500; font-size: 0.9rem; opacity: 0.8;">Hired Care Team:</div>
+                            <div class="doctor-slots-grid" id="doctor-slots-container">
+                                <!-- Slots: Cardiology, Neurology, etc. -->
+                            </div>
+                        </div>
+
+                        <!-- DOCTOR -->
+                        <div class="contact-card" id="free-doc-area" style="margin-top:0;">
+                            <i data-lucide="stethoscope" class="green"></i>
+                            <div style="width:100%">
+                                <strong class="profile-val" id="prof-doc-name">Unset</strong>
+                                <input type="text" class="profile-edit-input" id="edit-doc-name" value="" placeholder="Doctor Name (e.g. Dr. Sarah Jenkins)">
+                                <p class="profile-val" id="prof-doc-phone">--</p>
+                                <input type="tel" class="profile-edit-input" id="edit-doc-phone" value="" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" placeholder="10 Digit Phone Number" style="margin-top:4px;">
+                            </div>
+                        </div>
+                        
+                        <!-- NEW SECONDARY CONTACT 1 -->
+                        <div class="contact-card" style="margin-top:0.5rem; border: 1px solid var(--accent-orange); background: rgba(255, 136, 51, 0.05);">
+                            <i data-lucide="user-check" class="orange"></i>
+                            <div style="width:100%">
+                                <strong class="profile-val" id="prof-em1-name">Unset</strong>
+                                <input type="text" class="profile-edit-input" id="edit-em1-name" value="" placeholder="Emergency Contact 1 (e.g. John Doe)">
+                                <p class="profile-val" id="prof-em1-rel" style="font-size: 0.9rem; color: var(--accent-orange);">--</p>
+                                <input type="text" class="profile-edit-input" id="edit-em1-rel" value="" placeholder="Relation (e.g. Brother, Spouse)" style="margin-top:4px;">
+                                <p class="profile-val" id="prof-em1-phone">--</p>
+                                <input type="tel" class="profile-edit-input" id="edit-em1-phone" value="" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" placeholder="10 Digit Phone Number" style="margin-top:4px;">
+                            </div>
+                        </div>
+
+                        <!-- NEW SECONDARY CONTACT 2 -->
+                        <div class="contact-card" style="margin-top:0.5rem; border: 1px solid var(--accent-orange); background: rgba(255, 136, 51, 0.05);">
+                            <i data-lucide="user-check" class="orange"></i>
+                            <div style="width:100%">
+                                <strong class="profile-val" id="prof-em2-name">Unset</strong>
+                                <input type="text" class="profile-edit-input" id="edit-em2-name" value="" placeholder="Emergency Contact 2">
+                                <p class="profile-val" id="prof-em2-rel" style="font-size: 0.9rem; color: var(--accent-orange);">--</p>
+                                <input type="text" class="profile-edit-input" id="edit-em2-rel" value="" placeholder="Relation" style="margin-top:4px;">
+                                <p class="profile-val" id="prof-em2-phone">--</p>
+                                <input type="tel" class="profile-edit-input" id="edit-em2-phone" value="" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" placeholder="10 Digit Phone Number" style="margin-top:4px;">
+                            </div>
+                        </div>
+
+                        <!-- NEW SECONDARY CONTACT 3 -->
+                        <div class="contact-card" style="margin-top:0.5rem; border: 1px solid var(--accent-orange); background: rgba(255, 136, 51, 0.05);">
+                            <i data-lucide="user-check" class="orange"></i>
+                            <div style="width:100%">
+                                <strong class="profile-val" id="prof-em3-name">Unset</strong>
+                                <input type="text" class="profile-edit-input" id="edit-em3-name" value="" placeholder="Emergency Contact 3">
+                                <p class="profile-val" id="prof-em3-rel" style="font-size: 0.9rem; color: var(--accent-orange);">--</p>
+                                <input type="text" class="profile-edit-input" id="edit-em3-rel" value="" placeholder="Relation" style="margin-top:4px;">
+                                <p class="profile-val" id="prof-em3-phone">--</p>
+                                <input type="tel" class="profile-edit-input" id="edit-em3-phone" value="" maxlength="10" oninput="this.value = this.value.replace(/[^0-9]/g, '')" placeholder="10 Digit Phone Number" style="margin-top:4px;">
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- FAQ TAB -->
+            <div id="tab-faq" class="tab-pane hidden">
+                <header class="tab-header" style="margin-bottom: 1rem;">
+                    <div>
+                        <h2 class="text-phase" style="font-size: 2.5rem; margin-bottom: 0.5rem;">Symptom Engine</h2>
+                        <p style="color: var(--text-secondary); font-size: 1.1rem;">Search your symptoms below to find structured, safe food remedies.</p>
+                    </div>
+                </header>
+                
+                <div class="search-hero">
+                    <i data-lucide="search" class="search-icon"></i>
+                    <input type="text" id="faq-search" class="faq-search-box" placeholder="Search a symptom or letter (e.g. 'h', 'fatigue', 'rash')...">
+                </div>
+                
+                <div class="faq-container" id="faq-list">
+                    <!-- Javascript will dynamically populate symptoms here -->
+                </div>
+            </div>
+        </main>
+    </section>
+    <!-- DOCTOR MARKETPLACE MODAL -->
+    <div id="marketplace-modal" class="modal hidden" style="z-index: 200; display: none; align-items: center; justify-content: center; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85);">
+        <div class="modal-content glass-panel" style="max-width: 900px; width: 95%; height: 85vh; display: flex; flex-direction: column; padding: 2.5rem; position: relative;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem;">
+                <div>
+                    <h2 class="text-phase" style="font-size: 2.2rem;">Elite Specialist Marketplace</h2>
+                    <p style="color: var(--text-secondary);">Recruit world-class medical experts to your personal care team.</p>
+                </div>
+                <button id="close-marketplace-btn" class="btn btn-outline" style="min-width: 40px; padding: 10px;"><i data-lucide="x"></i></button>
+            </div>
+
+            <div class="marketplace-categories" style="display: flex; gap: 0.8rem; margin-bottom: 2rem; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none;">
+                <button class="btn btn-outline active category-btn" data-cat="all">All Specialties</button>
+                <button class="btn btn-outline category-btn" data-cat="Cardiology">Cardiology</button>
+                <button class="btn btn-outline category-btn" data-cat="Gastroenterology">Gastroenterology</button>
+                <button class="btn btn-outline category-btn" data-cat="ENT">E.N.T</button>
+                <button class="btn btn-outline category-btn" data-cat="Neurology">Neurology</button>
+                <button class="btn btn-outline category-btn" data-cat="Dermatology">Dermatology</button>
+            </div>
+
+            <div id="doctor-list" class="marketplace-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; overflow-y: auto; flex-grow: 1; padding: 5px;">
+                <!-- Doctors Injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="symptoms.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
